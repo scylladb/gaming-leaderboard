@@ -41,7 +41,7 @@ myst_heading_anchors = 3
 master_doc = "index"
 
 # General information about the project.
-project = 'ScyllaDB Cloud Getting Started Documentation'
+project = 'Build a Gaming Leaderboard using ScyllaDB Docs'
 copyright = str(date.today().year) + ', ScyllaDB. All rights reserved.'
 author = u'Scylla Project Contributors'
 
@@ -66,11 +66,11 @@ html_theme = 'sphinx_scylladb_theme'
 html_theme_options = {
     'conf_py_path': 'docs/source',
     'default_branch': 'main',
-    'github_issues_repository': 'scylladb/scylla-cloud-getting-started',
-    'github_repository': 'scylladb/scylla-cloud-getting-started',
+    'github_issues_repository': 'scylladb/gaming-leaderboard',
+    'github_repository': 'scylladb/gaming-leaderboard',
     'hide_edit_this_page_button': 'false',
     'hide_feedback_buttons': 'false',
-    'site_description': 'ScyllaDB Cloud Example Documentation',
+    'site_description': 'Building a monstrously fast Gaming Leaderboard with ScyllaDB.',
     "versions_unstable": UNSTABLE_VERSIONS,
     "versions_deprecated": DEPRECATED_VERSIONS,
 }

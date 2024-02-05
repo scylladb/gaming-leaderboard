@@ -6,14 +6,14 @@
   <p align="center">
   <img src=".github/images/scylla-cloud.png" alt="Imagem da linguagem" width="120">
   </p>
-  <h2 align="center"> Getting Started with ScyllaDB Cloud</h2>
+  <h2 align="center"> Building a Game Leaderboard using ScyllaDB </h2>
   
   <p align="center">
-    <a href="https://cloud-getting-started.scylladb.com">
+    <a href="https://gaming-leaderboard.scylladb.com">
         <strong>« Explore the Project »</strong>
     </a>
     <br />
-    <a href="https://github.com/scylladb/scylla-cloud-getting-started/issues/new">Report Bug or Request Feature</a>
+    <a href="https://github.com/scylladb/gaming-leaderboard/issues/new">Report Bug or Request Feature</a>
   </p>
 </p>
 <hr>

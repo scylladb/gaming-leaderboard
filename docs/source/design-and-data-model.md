@@ -23,25 +23,26 @@ the number of writes. You're probably familiar with the steps defined here:
 ## Conceptual Data Model
 
 Starting with the conceptual data model, we need to identify the key entities
-and the relationships between them. Our application is focused in a single entity called 'songs'. The concept is to fill with many songs as we want. 
+and the relationships between them. Our application will be focused on three different entities, such as:
 
+1. Song Submission - Whenever a user finish a gameplay and submit it to general submissions. 
+2. Players Submissions - Store the latest gameplays and scores from a specific user.
+3. Song Leaderboard - Leaderboard based on specific **song**, **instrument**, **difficulty** and **modifiers**.
 
-![Table Diagram](/_static/img/getting-started-diagram.png)
+The concept is to fill with many songs as we want. 
+
+![Table Diagram](_static/img/getting-started-diagram.png)
 
 ## Application Workflow
 
-Next, we move on to the Application Workflow. In this part, we identify the main
-queries or what questions we will ask the database. This part is important in
-Scylla, and other NoSQL databases and, as opposed to relational databases is
-performed early on in the data modeling process. Remember that our data modeling
-is built around the queries.
+Next, we move on to the Application Workflow. In this part, we identify the main queries or what questions we will ask the database. This part is important in Scylla and other NoSQL databases and, as opposed to relational databases is performed early on in the data modeling process. Remember that our data modeling is built around the queries.
 
 ## Application Features
 
-* Insert a Song
-* List all songs
-* Delete a song
-* Stress Testing
+* Insert Submission
+* Find a Submission
+* List the Player's Last Submissions
+* Song Leaderboard
 
 ## Queries
 
@@ -49,35 +50,121 @@ Now we can detail the above queries in
 [CQL](https://university.scylladb.com/courses/data-modeling/lessons/basic-data-modeling-2/topic/cql-cqlsh-and-basic-cql-syntax/):
 
 Q1: Create a Keyspace
+```cql
+CREATE KEYSPACE leaderboard
+        WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': '3'} 
+        AND durable_writes = true;
+```
+Q2: Create the 'Submissions' Table
+```cql
+CREATE TABLE IF NOT EXISTS leaderboard.submissions (
+    submission_id uuid,
+    song_id text,
+    player_id text,
+    modifiers frozen<set<text>>,
+    score int,
+    difficulty text,
+    instrument text,
+    played_at timestamp,
+    PRIMARY KEY (submission_id, played_at)
+);
+```
 
-    CREATE KEYSPACE prod_media_player
-            WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': '3'} 
-            AND durable_writes = true;
+Q3: Create the 'Leaderboard' Table
+```cql
+CREATE TABLE IF NOT EXISTS leaderboard.song_leaderboard (
+    submission_id uuid,
+    song_id text,
+    player_id text,
+    modifiers frozen<set<text>>,
+    score int,
+    difficulty text,
+    instrument text,
+    played_at timestamp,
+    PRIMARY KEY ((song_id, modifiers, difficulty, instrument), score, player_id)
+) WITH CLUSTERING ORDER BY (score DESC, player_id ASC);
+```
 
-Q2: Create a Table
+Q4: Create the 'User Submission History' Materialized View
+```cql
+CREATE MATERIALIZED VIEW leaderboard.user_submissions AS
+    SELECT *
+    	FROM leaderboard.submissions
+    	WHERE
+			submission_id IS NOT null AND
+			player_id IS NOT null AND
+			played_at IS NOT null
+    	PRIMARY KEY ((player_id), played_at, submission_id)
+    WITH CLUSTERING ORDER BY (played_at DESC);
+```
 
-    CREATE TABLE songs (
-            id int,
-            title text,
-            album text,
-            artist text,
-            created_at timestamp,
-            updated_at timestamp
-            PRIMARY KEY (id, updated_at)
-    );
+Q5: Insert new 'Submission' and 'Leaderboard'
+```cql
+INSERT INTO leaderboard.submissions (
+    submission_id, song_id, player_id, modifiers, score, difficulty, instrument, played_at
+) VALUES (
+    b5ee3f80-40f9-4dfd-9fb6-13a6c94147a3, 'starlight-muse', 'daniel-reis', {'none'}, 1000, 'expert', 'guitar', '2023-11-23 00:00:00'
+);
 
-Q3: Insert a new song
+INSERT INTO leaderboard.song_leaderboard (
+    submission_id, song_id, player_id, modifiers, score, difficulty, instrument, played_at
+) VALUES (
+    b5ee3f80-40f9-4dfd-9fb6-13a6c94147a3, 'starlight-muse', 'daniel-reis', {'none'}, 1000, 'expert', 'guitar', '2023-11-23 00:00:00'
+);
+```
 
-    INSERT INTO prod_media_player.songs (id,title,artist,album,created_at) VALUES (?,?,?,?,?);
+<div class="admonition note">
+    <p class="admonition-title">Note</p>
+    <p>
+        Since both tables have the same <strong>structure</strong>, the query will be same changing only the table name. For each new <strong>Submission</strong> the same data should be added to <strong>Leaderboard</strong>;
+    </p>
+</div>
 
-Q4: List all songs
 
-    SELECT * FROM pet WHERE songs
+Q6: Search a specific Submission
+```cql
+SELECT * FROM submissions WHERE submission_id = b5ee3f80-40f9-4dfd-9fb6-13a6c94147a3
+```
 
-Q5: Delete a specific song
+Q7: Search a specific Song leaderboard
+```cql
+SELECT * FROM leaderboard.song_leaderboard  
+WHERE 
+    song_id = 'starlight-muse'
+	AND modifiers = {'none'} 
+	AND difficulty = 'expert' 
+	AND instrument = 'guitar' 
+	AND player_id = 'danielhe4rt' 
+LIMIT 10;
+```
 
-    DELETE FROM songs WHERE id = ?
+Q8: Retrieve User Submission History
 
+```cql
+SELECT * FROM leaderboard.user_submissions WHERE 
+    user_id = 'daniel-reis'
+LIMIT 10;
+```
+
+Q9: Delete outdated leaderboard score from a user.
+
+```cql
+DELETE FROM leaderboard.song_leaderboard
+WHERE 
+    song_id = 'starlight-muse'
+	AND modifiers = {'none'} 
+	AND difficulty = 'expert' 
+	AND instrument = 'guitar' 
+	AND player_id = 'daniel-reis'
+    AND score < 1000;
+```
+
+<div class="admonition note">
+    <p class="admonition-title">Note</p>
+    <p>
+        If the user submit the same song with a higher score, you should delete the previous leaderboard entry and add the new one.
+    </p>
+</div>
 
 ## Helpful Material
 
