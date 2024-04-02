@@ -1,6 +1,6 @@
-# Quick start: Rust (Crablang)
+# Quick start: Rust 
 
-In this tutorial you'll build a simple Media Player to store our songs and build playlists
+In this tutorial you'll build a Gaming Leaderboard to store runs from a rhythm game. 
 
 ## 1. Setup the Enviroment
 
@@ -18,538 +18,701 @@ $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 Now with the Rust and Cargo installed, just create a new project using this command:
 
 ```sh
-cargo new media_player
+cargo new leaderboard-rust
 ```
 
-### 1.3 Setting the project dependencies
+### 1.3 Setting up the .env 
+
+We're gonna be using sensitive credentials on our project, to connect into ScyllaDB Cluster, so let's prepare an `.env` file to handle that. Create a new env in the root folder, next to `cargo.toml` and replace to your cluster credentials:
+
+```
+# App Config
+APP_NAME="Gaming Leaderboard"
+APP_VERSION="0.0.1"
+APP_URL="0.0.0.0"
+APP_PORT="8000"
+
+# Database Config
+SCYLLA_NODES="node-0.clusters.scylla.cloud,node-1.clusters.scylla.cloud,node-2.clusters.scylla.cloud"
+SCYLLA_USERNAME="scylla"
+SCYLLA_PASSWORD="your-password"
+SCYLLA_CACHED_QUERIES="15"
+SCYLLA_KEYSPACE="leaderboard"
+
+```
+
+### 1.4 Setting the project dependencies
+
+
 
 Let's do a quick change into our `cargo.toml` and add our project dependencies. 
 
 ```toml
 [package]
-name = "media_player"
+name = "leaderboard-rust"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-scylla = "0.8.0"
-uuid = {version = "0.8", features = ["v4"]}
-tokio = { version = "1.17.0", features = ["full"] }
-anyhow = "1.0.70"
-chrono = "0.4.24"
+actix-web = "4.5.1"
+charybdis = "0.4.2"
+chrono = "0.4.34"
+dotenvy = "0.15.7"
+scylla = { version = "0.12.0", features = ["time", "chrono"] }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.113"
+thiserror = "1.0.56"
+uuid = { version = "1.7.0", features = ["v4"] }
+log = "0.4.20"
 ```
 
-* [Scylla](https://crates.io/crates/scylla): using the latest driver release
+After setting the dependencies, let's install them using:
+
+```bash
+cargo run
+```
+
+Important items to check: 
+* [Scylla](https://crates.io/crates/scylla): using the latest driver release.
+* [Charybdis ORM](https://github.com/nodecosmos/charybdis): Charybdis is a ORM layer on top of scylla_rust_driver focused on easy of use and performance.
 * [Uuid](https://crates.io/crates/uuid): help us to create UUIDs in our project
-* [Tokio](https://crates.io/crates/tokio): Async calls in Rust.
-* [Anyhow](https://crates.io/crates/anyhow): Idiomatic Error Handling 
-* [Chrono](https://crates.io/crates/chrono): DateTime/Timestamp Handling
+* [Actix](https://actix.rs/docs/): Rust Web Framework.
+* [This Error](https://crates.io/crates/thiserror): Idiomatic Error Handling.
+* [Chrono](https://crates.io/crates/chrono): DateTime/Timestamp Handling.
 
-## 2. Connecting to the Cluster
+### 1.4 Project Structure
 
-Make sure to get the right credentials on your [ScyllaDB Cloud Dashboard](https://cloud.scylladb.com/clusters) in the tab `Connect`.
+This is how it will be our source folder at the end of this tutorial:
+
+```
+/src
+├── main.rs
+├── config
+│   ├── app.rs
+│   ├── config.rs
+│   └── mod.rs
+├── http
+│   ├── controllers
+│   │   ├── leaderboard_controller.rs
+│   │   ├── mod.rs
+│   │   └── submissions_controller.rs
+│   ├── mod.rs
+│   └── requests
+│       ├── leaderboard_request.rs
+│       ├── mod.rs
+│       └── submission_request.rs
+└── models
+    ├── leaderboard.rs
+    ├── mod.rs
+    └── submission.rs
+```
+
+
+
+## 2. Before Development
+
+We're about to develop a feature per time. However we have to set some items like configuration and migrations before jump into the implementations!
+
+```
+/src
+├── main.rs
+└── config
+    ├── app.rs
+    ├── config.rs
+    └── mod.rs
+```
+
+### 2.1 Setup the enviroment
+
+Step by step of the configuration files needed on this project:
+
+#### 2.1.1 Configuring the Environment
+
+Here we going store some **environment variables** to use in in the project. Here's the structure: 
 
 ```rust
-use anyhow::Result;
-use scylla::{Session, SessionBuilder};
-use std::time::Duration;
-#[tokio::main]
-async fn main() -> Result<()> {
+// File: src/config/config.rs
 
-    let session: Session = SessionBuilder::new()
-        .known_nodes(&[
-            "node-0.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-1.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-2.aws-sa-east-1.xxx.clusters.scylla.cloud",
-        ])
-        .connection_timeout(Duration::from_secs(30))
-        .user("scylla", "your-awesome-password")
-        .build()
-        .await
-        .unwrap();
+use serde::Serialize;
 
-    Ok(())
-
+#[derive(Clone, Debug, Serialize)]
+pub struct App {
+    pub name: String,
+    pub version: String,
+    pub url: String,
+    pub port: String,
 }
-```
 
-> If the connection got refused, check if you IP Address is added into allowed ips.
-
-## 3. Handling Queries
-
-At Rust driver you can use the function inside your cluster connection called `query()` and build the query you want to execute inside your database/keyspace.
-
-```rust
-use anyhow::Result;
-use scylla::{IntoTypedRows, Session, SessionBuilder, FromRow};
-use std::net::IpAddr;
-use std::time::Duration;
-
-
-#[tokio::main]
-async fn main() -> Result<()> {
-
-    let session: Session = SessionBuilder::new()
-        .known_nodes(&[
-            "node-0.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-1.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-2.aws-sa-east-1.xxx.clusters.scylla.cloud",
-        ])
-        .connection_timeout(Duration::from_secs(30))
-        .user("scylla", "your-awesome-password")
-        .build()
-        .await
-        .expect("connection refused");
-        
-   let query = "SELECT address, port, connection_stage FROM system.clients LIMIT 5";
-   // Simpler way
-   if let Some(rows) = session.query(query, &[]).await?.rows {
-        for row in rows.into_typed::<(IpAddr, i32, String)>() {
-            let row = row?;
-            println!("IP -> {}, Port -> {}, CS -> {}", row.0, row.1, row.2);
-        }
-    }
-    
-    // Complex, but cool way
-    session
-        .query(query, &[])
-        .await?
-        .rows
-        .map(|row| {
-            row.into_typed::<(IpAddr, i32, String)>()
-                .filter(|row| row.is_ok())
-                .map(|row| row.unwrap())
-                .collect::<Vec<_>>()
-        })
-        .unwrap()
-        .iter()
-        .for_each(|row| println!("IP -> {}, Port -> {}, CS -> {}", row.0, row.1, row.2));
-    Ok(())
+#[derive(Clone, Debug, Serialize)]
+pub struct Database {
+    pub nodes: Vec<String>,
+    pub username: String,
+    pub password: String,
+    pub cached_queries: usize,
+    pub keyspace: String,
 }
-```
 
-Output should look like: 
-```
-IP -> 123.123.123.69, Port -> 61667, CS -> READY
-IP -> 123.123.123.69, Port -> 62377, CS -> AUTHENTICATING
-IP -> 123.123.123.69, Port -> 63221, CS -> AUTHENTICATING
-IP -> 123.123.123.69, Port -> 65225, CS -> READY
-```
+#[derive(Clone, Debug, Serialize)]
+pub struct Config {
+    pub app: App,
+    pub database: Database
+}
 
-
-
-### 3.1 Creating a Keyspace
-
-The `keyspace` inside the ScyllaDB ecossystem can be interpreted as your `database` or `collection`.
-
-On your connection boot, you don't need to provide it but you will use it later and also is able to create when you need.
-
-```rust
-use anyhow::Result;
-use scylla::{Session, SessionBuilder};
-use std::time::Duration;
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let keyspace = String::from("media_player");
-
-    let session: Session = SessionBuilder::new()
-        .known_nodes(&[
-            "node-0.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-1.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-2.aws-sa-east-1.xxx.clusters.scylla.cloud",
-        ])
-        .connection_timeout(Duration::from_secs(5))
-        .user("scylla", "your-password")
-        .build()
-        .await
-        .unwrap();
-
-    // Verify if the Keyspace already exists in your Cluster
-    let validate_keyspace_query = session
-        .prepare("select keyspace_name from system_schema.keyspaces WHERE keyspace_name=?")
-        .await?;
-
-    let has_keyspace = session
-        .execute(&validate_keyspace_query, (&keyspace,))
-        .await?
-        .rows_num()
-        .unwrap();
-
-    if has_keyspace == 0 {
-        let new_keyspace_query = format!(
-            "
-            CREATE KEYSPACE {} 
-                WITH replication = {{
-                    'class': 'NetworkTopologyStrategy',
-                     'replication_factor': '3'
-                }}
-                AND durable_writes = true
-        ",
-            keyspace
-        );
-
-        session.query(new_keyspace_query, &[]).await?;
-        println!("Keyspace {} created!", &keyspace)
-    } else {
-        println!("Keyspace {} already created!", &keyspace)
+impl Config {
+    pub fn new() -> Self {
+        Config {
+            app: App {
+                name: dotenvy::var("APP_NAME").unwrap(),
+                version: dotenvy::var("APP_VERSION").unwrap(),
+                url: dotenvy::var("APP_URL").unwrap(),
+                port: dotenvy::var("APP_PORT").unwrap(),
+            },
+            database: Database {
+                nodes: dotenvy::var("SCYLLA_NODES").unwrap().split(',').map(|s| s.to_string()).collect(),
+                username: dotenvy::var("SCYLLA_USERNAME").unwrap(),
+                password: dotenvy::var("SCYLLA_PASSWORD").unwrap(),
+                cached_queries: dotenvy::var("SCYLLA_CACHED_QUERIES").unwrap().parse::<usize>().unwrap(),
+                keyspace: dotenvy::var("SCYLLA_KEYSPACE").unwrap()
+            }
+        }
     }
-
-    session.use_keyspace(keyspace, false).await?;
-
-    Ok(())
 }
+
+
 ```
 
-> After that you probably will need to re-create your connection poiting which `keyspace` you want to use.
+#### 2.1.2 Configuring the App State
 
-### 3.2 Creating a Table
+The AppState is the main handler for Actix Web maintain the data during the Rust application Runtime. 
 
-A table is used to store part or all the data of your app (depends on how you will build it). 
-Remember to add your `keyspace` into your connection and let's create a table to store our liked songs.
+So, we'll be setting up the Database Connection for *Charybdis*, which expect a `CachingSession` to run queries under the ORM.
 
 ```rust
-use anyhow::Result;
-use scylla::{Session, SessionBuilder};
+// file: src/config/app.rs
+
+use std::sync::Arc;
 use std::time::Duration;
+use dotenvy::dotenv;
+use scylla::{CachingSession, Session, SessionBuilder};
+use crate::config::config::Config;
 
-static KEYSPACE: &str = "media_player_rust";  
-static TABLE: &str = "playlist";
-  
-#[tokio::main]
-async fn main() -> Result<()> {
-    let session: Session = SessionBuilder::new()
-        .known_nodes(&[
-            "node-0.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-1.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-2.aws-sa-east-1.xxx.clusters.scylla.cloud",
-        ])
-        .connection_timeout(Duration::from_secs(30))
-        .user("scylla", "****")
-        .build()
-        .await
-        .expect("connection refused");
-  
-    // Verify if the table already exists in the specific Keyspace inside your Cluster
-    let validate_table_query = session
-        .prepare("
-            select keyspace_name, table_name from system_schema.tables where keyspace_name = ? AND table_name = ?
-        ")
-        .await?;
+#[derive(Debug, Clone)]
+pub struct AppState {
+    pub config: Config,
+    pub database: Arc<CachingSession>
+}
 
-    let has_table = session
-        .execute(&validate_table_query, (&keyspace, &table))
-        .await?
-        .rows_num()
-        .unwrap();
+impl AppState {
+    pub async fn new() -> Self {
+        dotenv().expect(".env file not found");
 
-    if has_table == 0 {
-        let new_keyspace_query = format!(
-            "CREATE TABLE {}.{} (
-                id uuid,
-                title text,
-                album text,
-                artist text,
-                created_at timestamp,
-                PRIMARY KEY (id, updated_at)
-            )",
-            &keyspace, &table
-        );
+        let config = Config::new();
+        let session: Session = SessionBuilder::new()
+            .known_nodes(config.database.nodes)
+            .connection_timeout(Duration::from_secs(5))
+            .user(config.database.username, config.database.password)
+            .build()
+            .await
+            .expect("Connection Refused. Check your credentials and IP linked on the ScyllaDB Cloud.");
 
-        session.query(new_keyspace_query, &[]).await?;
-        println!("Table {} created!", &table)
-    } else {
-        println!("Table {} already created!", &table)
+        session.use_keyspace("leaderboard", false).await.expect("Keyspace not found");
+
+        AppState {
+            config: Config::new(),
+            database: Arc::new(CachingSession::from(session, config.database.cached_queries))
+        }
     }
-  
-    Ok(())
 }
 ```
 
-### 3.3 Inserting data
+#### 2.1.3 Making it Public
 
-Now that we have the keyspace and a table inside of it, we need to bring some good songs and populate it. 
+Under the `src/config/mod.rs` make sure to set the modules as public.
+
+```rust 
+// file: src/config/mod.rs
+
+pub mod app;
+pub mod config;
+```
+
+
+#### 2.1.4 Configuring the Runner
+
+The last part of our configuration is the Web server to start our app. Here we need to call Actix HTTP and tell him what we're going to be passing under the AppState.
+
+```rust 
+
+use actix_web::{App, HttpServer};
+use actix_web::web::Data;
+
+use crate::config::app::AppState;
+
+mod config;
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    let app_data = AppState::new().await;
+
+    println!("Web Server Online!");
+    println!("Listening on http://{}:{}", app_data.config.app.url, app_data.config.app.port);
+    HttpServer::new(move || {
+        App::new()
+            .app_data(Data::new(AppState::new()))
+    }).bind((
+        app_data.config.app.url,
+        app_data.config.app.port.parse::<u16>().unwrap()
+    ))?.run().await
+}
+```
+
+<div class="admonition note">
+    <p class="admonition-title">Note</p>
+    <p>
+        At the <strong> bind() </strong>, you should add the Base URL and Port for your server to run. 
+    </p>
+</div>
+
+Great! Now we're good to work on our Migrations!
+
+
+### 2.2 Migrations and Models
+
+Our goal is to make the development of this project in a good shape and easier to maintain. Thinking on that, I decided to use [Charybdis ScyllaDB ORM](https://github.com/nodecosmos/charybdis) because they have a really good migration tool for migration.
+
+```
+/src
+├── main.rs
+├── config
+│   ├── app.rs
+│   ├── config.rs
+│   └── mod.rs
+└─── models <- 
+    ├── leaderboard.rs
+    ├── mod.rs
+    └── submission.rs
+```
+
+#### 2.2.1 Setting up the Models
+
+At our project we'll be using two models, which will be: `submission.rs` and `leaderboard.rs`. At our design, we set the scope for each query which using Charybdis will be modeled like this:
+
 
 ```rust
-use anyhow::Result;
-use chrono::{Duration, Utc};
-use scylla::frame::value::Timestamp;
-use scylla::{Session, SessionBuilder};
-use std::{str::FromStr, time::Duration as ConnectionDuration};
-use uuid::{self, Uuid};
+// file: src/models/submssions.rs
 
-async fn main() -> Result<()> {
-    let keyspace = String::from("media_player");
-    let table = String::from("songs");
+use charybdis::macros::charybdis_model;
+use charybdis::types::{Frozen, Int, Set, Text, Timestamp, Uuid};
+use serde::{Deserialize, Serialize};
 
-    let session: Session = SessionBuilder::new()
-        .known_nodes(&[
-            "node-0.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-1.aws-sa-east-1.xxx.clusters.scylla.cloud",
-            "node-2.aws-sa-east-1.xxx.clusters.scylla.cloud",
-        ])
-        .connection_timeout(ConnectionDuration::from_secs(5))
-        .user("scylla", "your-password")
-        .build()
-        .await
-        .unwrap();
 
-    session.use_keyspace(keyspace, false).await?;
+#[charybdis_model(
+table_name = submissions,
+partition_keys = [id],
+clustering_keys = [played_at],
+global_secondary_indexes = [],
+local_secondary_indexes = [],
+table_options = "
+  CLUSTERING ORDER BY (played_at DESC)
+",
+)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct Submission {
+    pub id: Uuid,
+    pub song_id: Text,
+    pub player_id: Text,
+    pub modifiers: Frozen<Set<Text>>,
+    pub score: Int,
+    pub difficulty: Text,
+    pub instrument: Text,
+    pub played_at: Timestamp,
+}
+```
 
-    let song_list = vec![
-        (
-            Uuid::new_v4(),
-            "Stairway to Heaven",
-            "Led Zeppelin IV",
-            "Led Zeppelin",
-            Timestamp(Duration::seconds(Utc::now().timestamp())),
-        ),
-        (
-            Uuid::from_str("d754f8d5-e037-4898-af75-44587b9cc424").unwrap(),
-            "Glimpse of Us",
-            "Smithereens",
-            "Joji",
-            Timestamp(Duration::seconds(Utc::now().timestamp())),
-        ),
-        (
-            Uuid::new_v4(),
-            "Vegas",
-            "From Movie ELVIS",
-            "Doja Cat",
-            Timestamp(Duration::seconds(Utc::now().timestamp())),
-        ),
-    ];
+```rust
+// file: src/models/leaderboard.rs
 
-    let insert_query = format!(
-        "INSERT INTO {} (id,title,album,artist,created_at) VALUES (?,?,?,?,?)",
-        table
-    );
+use charybdis::macros::charybdis_model;
+use charybdis::types::{Frozen, Int, Set, Text, Timestamp, Uuid};
+use serde::{Deserialize, Serialize};
 
-    let prepared = session.prepare(insert_query).await?;
+#[charybdis_model(
+table_name = song_leaderboard,
+partition_keys = [song_id, modifiers, difficulty, instrument],
+clustering_keys = [player_id, score],
+global_secondary_indexes = [],
+local_secondary_indexes = [],
+table_options = "
+  CLUSTERING ORDER BY (score DESC, player_id ASC)
+",
+)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct Leaderboard {
+    pub id: Uuid,
+    pub song_id: Text,
+    pub player_id: Text,
+    pub modifiers: Frozen<Set<Text>>,
+    pub score: Int,
+    pub difficulty: Text,
+    pub instrument: Text,
+    pub played_at: Timestamp,
+}
 
-    for song in song_list {
-        session.execute(&prepared, song).await?;
-        println!("Inserting Track: {}", song.1.to_string());
+```
+
+Charybdis has the `charybdis_model` macro that allows you to create all the possible queries and create migrations from it.
+
+To finish the setup, make sure to set as public the structs on `src/models/mod.rs`
+
+```rust
+// file: src/models/mod.rs
+
+pub mod leaderboard;
+pub mod submission;
+```
+
+#### 2.2.2 Migrating your Database. 
+
+Now it's time! Get your credentials and migrate the your models to a ScyllaDB Cluster using the command below in the project root!
+
+```shell
+migrate -u scylla -p your-password --host your-node.clusters.scylla.cloud --keyspace leaderboard -d
+
+# Detected 'src/models' directory
+
+# Detected first migration for: submissions Table!
+# Running CQL: CREATE TABLE IF NOT EXISTS submissions
+# (
+#    difficulty Text,
+#    id Uuid,
+#    instrument Text,
+#    modifiers Frozen < Set < Text > >,
+#    played_at Timestamp,
+#    player_id Text,
+#    score Int,
+#    song_id Text,
+#    PRIMARY KEY ((id) ,played_at)
+# )
+# WITH
+#  CLUSTERING ORDER BY (played_at DESC)
+
+# CQL executed successfully! ✅
+
+
+# Detected first migration for: song_leaderboard Table!
+# Running CQL: CREATE TABLE IF NOT EXISTS song_leaderboard
+# (
+#     difficulty Text,
+#     id Uuid,
+#     instrument Text,
+#     modifiers Frozen < Set < Text > >,
+#     played_at Timestamp,
+#     player_id Text,
+#     score Int,
+#     song_id Text,
+#     PRIMARY KEY ((song_id, modifiers, difficulty, instrument) ,player_id, score)
+# )
+#  WITH
+#   CLUSTERING ORDER BY (player_id ASC, score DESC)
+
+# CQL executed successfully! ✅
+```
+
+Now we're good to start developing the Web Features! 
+
+
+
+
+## 3. Feature Development
+
+With everything set-up, the next step is to develop each endpoint using Actix and Charybdis. 
+
+```
+/src
+├── main.rs
+├── config
+│   ├── app.rs
+│   ├── config.rs
+│   └── mod.rs
+├── http <- 
+│   ├── controllers
+│   │   ├── leaderboard_controller.rs
+│   │   ├── mod.rs
+│   │   └── submissions_controller.rs
+│   ├── mod.rs
+│   └── requests
+│       ├── leaderboard_request.rs
+│       ├── mod.rs
+│       └── submission_request.rs
+└─── models 
+    ├── leaderboard.rs
+    ├── mod.rs
+    └── submission.rs
+```
+
+
+### 3.1 Feature: Submission Endpoint
+
+
+#### 3.1.1 Submission: Data Transfer Object
+
+To persist data into our ScyllaDB Database, we need to shape it with the right fields and types. So, so let's create a DTO to store it for us.
+
+
+```rust
+// file: src/http/requests/submission_request.rs
+
+use charybdis::types::{Frozen, Int, Set, Text};
+use serde::Deserialize;
+use validator::Validate;
+
+#[derive(Deserialize, Debug, Validate)]
+pub struct SubmissionDTO {
+    pub song_id: Text,
+    pub player_id: Text,
+    pub modifiers: Frozen<Set<Text>>,
+    pub score: Int,
+    pub difficulty: Text,
+    pub instrument: Text,
+}
+
+```
+
+At this DTO, we'll be adding the `Validate` and `Deserialize` derives since this fields will be received from a **JSON Payload**. 
+
+Add it to the folder module:
+
+```rust
+//file: src/http/requests/mod.rs
+
+pub mod submission_request;
+```
+
+
+#### 3.1.2 Submission: Model from Request
+
+Let's keep our code well structured and create an Model from our DTO using a brand new function `from_request()`. 
+
+```rust
+// file: src/models/submission.rs
+
+use charybdis::macros::charybdis_model;
+use charybdis::types::{Frozen, Int, Set, Text, Timestamp, Uuid};
+use serde::{Deserialize, Serialize};
+
+
+use crate::http::requests::submission_request::SubmissionDTO;
+
+#[charybdis_model(
+table_name = submissions,
+partition_keys = [id],
+clustering_keys = [played_at],
+global_secondary_indexes = [],
+local_secondary_indexes = [],
+table_options = "
+  CLUSTERING ORDER BY (played_at DESC)
+",
+)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct Submission {
+    #[serde(default = "Uuid::new_v4")]
+    pub id: Uuid,
+    pub song_id: Text,
+    pub player_id: Text,
+    pub modifiers: Frozen<Set<Text>>,
+    pub score: Int,
+    pub difficulty: Text,
+    pub instrument: Text,
+    pub played_at: Timestamp,
+}
+
+impl Submission {
+    pub fn from_request(payload: &SubmissionDTO) -> Self {
+        Submission {
+            id: Uuid::new_v4(),
+            song_id: payload.song_id.to_string(),
+            player_id: payload.player_id.to_string(),
+            difficulty: payload.difficulty.to_string(),
+            instrument: payload.instrument.to_string(),
+            modifiers: payload.modifiers.to_owned(),
+            score: payload.score.to_owned(),
+            played_at: chrono::Utc::now(),
+            ..Default::default()
+        }
     }
-
-    Ok(()) 
 }
+
 ```
 
-### 3.3 Reading data
+#### 3.1.3 Submission: Controller
 
-Since probably we added more than 3 songs into our database, let's list it into our terminal.
+Actix allows you to parse a payload from JSON requests with a specific struct defined previously. So, we'll be using the `SubmissionDTO` as our field validation, build a model and insert it on the database. 
 
 ```rust
-use anyhow::Result;
-use chrono::{Duration, Utc, DateTime};
-use scylla::cql_to_rust::FromCqlVal;
-use scylla::frame::value::Timestamp;
-use scylla::{Session, SessionBuilder, IntoTypedRows};
-use std::{str::FromStr, time::Duration as ConnectionDuration};
-use uuid::{self, Uuid};
+// file: src/http/controllers/submissions_controller.rs
 
-#[tokio::main]
+use actix_web::{HttpResponse, post, Responder, Result, web};
+use charybdis::operations::Insert;
+use serde_json::json;
+use validator::Validate;
 
-async fn main() -> Result<()> {
-    let session: Session = SessionBuilder::new()
-        .known_nodes(&[
-            "your-node-1.aws-sa-east-1.1.clusters.scylla.cloud",
-            "your-node-2.aws-sa-east-1.2.clusters.scylla.cloud",
-            "your-node-3.aws-sa-east-1.3.clusters.scylla.cloud",
-        ])
-        .connection_timeout(ConnectionDuration::from_secs(5))
-        .user("scylla", "your-awesome-password")
-        .build()
-        .await
-        .unwrap();
+use crate::config::app::AppState;
+use crate::http::requests::submission_request::SubmissionDTO;
+use crate::http::SomeError;
+use crate::models::submission::Submission;
 
-    session.use_keyspace("media_player", false).await?;
+#[post("/submissions")]
+async fn post_submission(
+    data: web::Data<AppState>,
+    payload: web::Json<SubmissionDTO>,
+) -> Result<impl Responder, SomeError> {
+    let validated = payload.validate();
+    
+    let response = match validated {
+        Ok(_) => {
+            let submission = Submission::from_request(&payload);
+            submission.insert().execute(&data.database).await?;
 
-    session.query("SELECT id, title, album, artist, created_at FROM songs", &[])
-        .await?
-        .rows
-        .map(|row| {
-            row.into_typed::<(Uuid, String, String, String, Duration)>()
-                .map(|row| row.unwrap())
-                .collect::<Vec<_>>()
-        })
-        .unwrap()
-        .iter()
-        .for_each(|row| {
-            println!(
-                "Song: {} - Album: {} - Created At: {}", 
-                row.1, row.2, row.4
-            )
-        });
+            HttpResponse::Ok().json(json!(submission))
+        }
+        Err(err) => HttpResponse::BadRequest().json(json!(err)),
+    };
 
-    Ok(())
+    Ok(response)
 }
-```
-
-The result will look like this:
 
 ```
-Song: Vegas - Album: From Movie ELVIS - Created At: P19578DT6810S
-Song: Glimpse of Us - Album: Smithereens - Created At: P19578DT6810S
-Song: Stairway to Heaven - Album: Led Zeppelin IV - Created At: P19578DT6810S
-```
 
-> Remeber to decode your Uuid if needed using the function `.toString()`
-
-### 3.4 Updating Data
-
-Ok, almost there! Now we're going to learn about update but here's a disclaimer: 
-> INSERT and UPDATES are not equals!
-
-There's a myth in Scylla/Cassandra community that it's the same for the fact that you just need the `Partition Key` and `Clustering Key` (if you have one) and query it.
-
-If you want to read more about it, [click here.](https://docs.scylladb.com/stable/using-scylla/cdc/cdc-basic-operations.html)
-
-As we can see, the `UPDATE QUERY` takes two fields on `WHERE` (PK and CK). Check the snippet below: 
+Add it to the folder module:
 
 ```rust
-use anyhow::Result;
-use chrono::{Duration, Utc, DateTime};
-use scylla::cql_to_rust::FromCqlVal;
-use scylla::frame::value::Timestamp;
-use scylla::{Session, SessionBuilder, IntoTypedRows};
-use std::{str::FromStr, time::Duration as ConnectionDuration};
-use uuid::{self, Uuid};
+//file: src/http/requests/mod.rs
 
-async fn main() -> Result<()> {
-    let session: Session = SessionBuilder::new()
-        .known_nodes(&[
-            "node-0.aws-sa-east-1.5c3451e0374e0987b65f.clusters.scylla.cloud",
-            "node-1.aws-sa-east-1.5c3451e0374e0987b65f.clusters.scylla.cloud",
-            "node-2.aws-sa-east-1.5c3451e0374e0987b65f.clusters.scylla.cloud",
-        ])
-        .connection_timeout(ConnectionDuration::from_secs(5))
-        .user("scylla", "your-password")
-        .build()
-        .await
-        .unwrap();
-
-    let song_to_update = (
-        "Glimpse of Us",
-        "2022 em uma música",
-        "Inutilismo",
-        Uuid::from_str("d754f8d5-e037-4898-af75-44587b9cc424").unwrap(),
-        Timestamp(Duration::seconds(1691547115))
-    );
-
-    
-
-    session.use_keyspace("media_player", false).await?;
-
-    let prepared_query = session.prepare(
-        "UPDATE songs set title = ?, album = ?, artist = ? where id = ? and created_at = ?"
-    ).await?;
-        
-    session.execute(&prepared_query, song_to_update).await?;
-    
-
-    session.query("SELECT id, title, album, artist, created_at FROM songs WHERE id = ?", (song_to_update.3,))
-        .await?
-        .rows
-        .map(|row| {
-            row.into_typed::<(Uuid, String, String, String, Duration)>()
-                .map(|row| row.unwrap())
-                .collect::<Vec<_>>()
-        })
-        .unwrap()
-        .iter()
-        .for_each(|row| {
-            println!(
-                "ID: {} -  Song: {} - Album: {} - Created At: {}", 
-                row.0, row.1, row.2, row.4
-            )
-        });
-
-    Ok(())
-}
-```
-After inserted, let's query for the ID and see the results:
-
-```
-scylla@cqlsh:media_player> select * from songs where id = d754f8d5-e037-4898-af75-44587b9cc424;
-
- id                                   | created_at                      | album              | artist     | title
---------------------------------------+---------------------------------+--------------------+------------+---------------
- d754f8d5-e037-4898-af75-44587b9cc424 | 2023-08-09 02:11:55.000000+0000 | 2022 em uma música | Inutilismo | Glimpse of Us
-
-(1 rows)
+pub mod submission_controller;
 ```
 
-It only "updated" the field `title` and `updated_at` (that is our Clustering Key) and since we didn't inputted the rest of the data, it will not be replicated as expected.
+
+### 3.2 Feature: Leaderboard Ingestion
 
 
-### 3.5 Deleting Data
+#### 3.1.1 Submission: Data Transfer Object
 
-Let's understand what we can DELETE with this statement. There's the normal `DELETE` statement that focus on `ROWS` and other one that delete data only from `COLUMNS` and the syntax is very similar.
+To persist data into our ScyllaDB Database, we need to shape it with the right fields and types. So, so let's create a DTO to store it for us.
 
-```sql 
-// Deletes a single row
-DELETE FROM songs WHERE id = d754f8d5-e037-4898-af75-44587b9cc424;
-
-// Deletes a whole column
-DELETE artist FROM songs WHERE id = d754f8d5-e037-4898-af75-44587b9cc424;
-```
-
-If you want to erase a specific column, you also should pass as parameter the `Clustering Key` and be very specific in which register you want to delete something. 
-On the other hand, the "normal delete" just need the `Partition Key` to handle it. Just remember: if you use the statement "DELETE FROM keyspace.table_name" it will delete ALL the rows that you stored with that ID. 
 
 ```rust
-use anyhow::Result;
-use chrono::{Duration, Utc, DateTime};
-use scylla::cql_to_rust::FromCqlVal;
-use scylla::frame::value::Timestamp;
-use scylla::{Session, SessionBuilder, IntoTypedRows};
-use std::{str::FromStr, time::Duration as ConnectionDuration};
-use uuid::{self, Uuid};
+// file: src/http/requests/submission_request.rs
 
-#[tokio::main]
+use charybdis::types::{Frozen, Int, Set, Text};
+use serde::Deserialize;
+use validator::Validate;
 
-async fn main() -> Result<()> {
-    let session: Session = SessionBuilder::new()
-        .known_nodes(&[
-            "node-0.aws-sa-east-1.5c3451e0374e0987b65f.clusters.scylla.cloud",
-            "node-1.aws-sa-east-1.5c3451e0374e0987b65f.clusters.scylla.cloud",
-            "node-2.aws-sa-east-1.5c3451e0374e0987b65f.clusters.scylla.cloud",
-        ])
-        .connection_timeout(ConnectionDuration::from_secs(5))
-        .user("scylla", "your-awesome-password")
-        .build()
-        .await
-        .unwrap();
-
-    let song_to_delete = (
-        "Glimpse of Us",
-        "2022 em uma música",
-        "Inutilismo",
-        Uuid::from_str("d754f8d5-e037-4898-af75-44587b9cc424").unwrap(),
-        Timestamp(Duration::seconds(1691547115))
-    );
-
-    
-
-    session.use_keyspace("media_player", false).await?;
-
-    let prepared_query = session.prepare(
-        "DELETE FROM songs where id = ? and created_at = ?"
-    ).await?;
-        
-    session.execute(&prepared_query, (song_to_delete.3, song_to_delete.4,)).await?;
-    println!("Song deleted!");
-
-    Ok(())
+#[derive(Deserialize, Debug, Validate)]
+pub struct SubmissionDTO {
+    pub song_id: Text,
+    pub player_id: Text,
+    pub modifiers: Frozen<Set<Text>>,
+    pub score: Int,
+    pub difficulty: Text,
+    pub instrument: Text,
 }
+
 ```
 
-## Conclusion
+At this DTO, we'll be adding the `Validate` and `Deserialize` derives since this fields will be received from a **JSON Payload**. 
 
-Yay! You now have the knowledge to use the basics of ScyllaDB with Rust.
+#### 3.1.2 Submission: Model from Request
 
-If you think that something can be improved, please open an issue and let's make it happen!
+Let's keep our code well structured and create an Model from our DTO using a brand new function `from_request()`. 
 
-Did you like the content? Don't forget to star the repo and follow us on socials.
+```rust
+// file: src/models/submission.rs
+
+use charybdis::macros::charybdis_model;
+use charybdis::types::{Frozen, Int, Set, Text, Timestamp, Uuid};
+use serde::{Deserialize, Serialize};
+
+
+use crate::http::requests::submission_request::SubmissionDTO;
+
+#[charybdis_model(
+table_name = submissions,
+partition_keys = [id],
+clustering_keys = [played_at],
+global_secondary_indexes = [],
+local_secondary_indexes = [],
+table_options = "
+  CLUSTERING ORDER BY (played_at DESC)
+",
+)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct Submission {
+    #[serde(default = "Uuid::new_v4")]
+    pub id: Uuid,
+    pub song_id: Text,
+    pub player_id: Text,
+    pub modifiers: Frozen<Set<Text>>,
+    pub score: Int,
+    pub difficulty: Text,
+    pub instrument: Text,
+    pub played_at: Timestamp,
+}
+
+impl Submission {
+    pub fn from_request(payload: &SubmissionDTO) -> Self {
+        Submission {
+            id: Uuid::new_v4(),
+            song_id: payload.song_id.to_string(),
+            player_id: payload.player_id.to_string(),
+            difficulty: payload.difficulty.to_string(),
+            instrument: payload.instrument.to_string(),
+            modifiers: payload.modifiers.to_owned(),
+            score: payload.score.to_owned(),
+            played_at: chrono::Utc::now(),
+            ..Default::default()
+        }
+    }
+}
+
+```
+
+#### 3.1.3 Submission: Controller
+
+Actix allows you to parse a payload from JSON requests with a specific struct defined previously. So, we'll be using the `SubmissionDTO` as our field validation, build a model and insert it on the database. 
+
+```rust
+// file: src/http/controllers/submissions_controller.rs
+
+use actix_web::{HttpResponse, post, Responder, Result, web};
+use charybdis::operations::Insert;
+use serde_json::json;
+use validator::Validate;
+
+use crate::config::app::AppState;
+use crate::http::requests::submission_request::SubmissionDTO;
+use crate::http::SomeError;
+use crate::models::submission::Submission;
+
+#[post("/submissions")]
+async fn post_submission(
+    data: web::Data<AppState>,
+    payload: web::Json<SubmissionDTO>,
+) -> Result<impl Responder, SomeError> {
+    let validated = payload.validate();
+    
+    let response = match validated {
+        Ok(_) => {
+            let submission = Submission::from_request(&payload);
+            submission.insert().execute(&data.database).await?;
+
+            HttpResponse::Ok().json(json!(submission))
+        }
+        Err(err) => HttpResponse::BadRequest().json(json!(err)),
+    };
+
+    Ok(response)
+}
+
+```
+
+

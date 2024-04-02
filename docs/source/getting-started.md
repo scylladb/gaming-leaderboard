@@ -1,41 +1,136 @@
-# Getting Started with ScyllaDB Cloud: A sample Media Player App
+# Getting Started: Gaming Leaderboard Example
 
 
 ## Introduction
 
-This guide will show you how to create a Cluster into ScyllaDB Cloud, create an Media Player app from scratch and configure it
-to use Scylla as the backend datastore. It'll walk you through all the stages
-of the development process, from gathering requirements to building and running
-the application.
-
-As an example, you will use an application called Media Player. Media Player stores all the tracks
-that you want to listen and count how many times you listened to. The application consists of three parts:
--   Validate if you have the Keyspace and Table needed to start storing your tracks/songs;
--   Access to an REPL with commands to store/list/delete songs;
--   Run a simple stresser into ScyllaDB Cloud.
+This guide will show you how to create an monstrously fast and scalable Gaming Leaderboard application from scratch in many languages using ScyllaDB as datastore. It'll walk you through all the stages of the development process, from gathering requirements to building and running the application.
 
 ## Requirements
-
-### Prerequisites for Deploying the Application
 
 The example application uses ScyllaDB Cloud to run a three-node ScyllaDB cluster. You can claim your free Scylla Cloud account [here](https://scylladb.com/cloud).
 
 
-### Performance Requirements
+## Project Details
 
-The application has two performance-related parts: sensors that write to
-the database (throughput sensitive) and a backend dashboard that reads from
-the database (latency sensitive). 
+Since we're building an API, here's some spefications on what we're going to work with. Each language has your own way to implement it, so let's focus on the I/O. 
 
-* This example assumes 99% writes (songs) and 1% reads (backend dashboard).  
-* SLA:
-  - Writes: throughput of 100K operations per second.
-  - Reads: latency of up to 10 milliseconds for the
-    [99th percentile](https://engineering.linkedin.com/performance/who-moved-my-99th-percentile-latency).
-* The application requires high availability and fault tolerance. Even if a
-ScyllaDB node goes down or becomes unavailable, the cluster is expected to
-remain available and continue to provide service. You can learn more about
-Scylla high availability in [this lesson](https://university.scylladb.com/courses/scylla-essentials-overview/lessons/high-availability/). 
+
+### 1. Find a Submission
+
+After you submit a specific gameplay score to the API, you'll be able to fetch it. 
+
+* **Route:** /submissions/{submission_id}
+* **Verb:** GET
+
+#### Response Example
+```json
+{
+    "message": "Submission found.",
+    "submission": {
+        "difficulty": "daniel-reiss",
+        "id": "01abf900-dcc9-4f61-94fe-a353d4e85bf6",
+        "instrument": "guitar",
+        "modifiers": [
+            "no-modifiers"
+        ],
+        "played_at": "2024-02-14T18:34:46.985Z",
+        "player_id": "daniel-reiss",
+        "score": 30005,
+        "song_id": "stone-audioslave"
+    }
+}
+```
+
+
+### 2. Submit a Gameplay 
+
+After you submit a specific gameplay score to the API, you'll be able to fetch it. 
+
+* **Route:** /submissions/{submission_id}
+* **Verb:** POST
+
+
+#### Example Payload
+
+```json
+{
+    "song_id": "stone-audioslave",
+    "player_id": "startupme",
+    "modifiers": [
+        "no-modifiers"
+    ],
+    "score": 19999,
+    "difficulty": "expert",
+    "instrument": "guitar"
+}
+```
+
+#### Response Example
+
+```json 
+
+{
+    "message": "Submission created successfully",
+    "submission": {
+        "difficulty": "expert",
+        "id": "531be3f3-2d4f-4d7b-bfb3-1366e2a632c4",
+        "instrument": "guitar",
+        "modifiers": [
+            "no-modifiers"
+        ],
+        "played_at": "2024-02-26T13:13:51.331231046Z",
+        "player_id": "startupme",
+        "score": 19999,
+        "song_id": "stone-audioslave"
+    }
+}
+```
+
+### 3. Retrieve Leaderboard by Song
+
+With many players submitting a specific song, now it's time to check who did the best score. However, you will have to filter by specific items:
+
+* **Route:** /leaderboard/{song_id}
+* **Verb:** POST
+* **Filters:**
+  * Instrument: String
+  * Difficulty: String
+  * Modifiers: String[]
+
+#### Example Request
+
+**URI:** /leaderboard/{song_id}?instrument=guitar&difficulty=expert&modifiers[]=no-modifiers
+
+#### Example Response
+
+```json
+[
+    {
+        "difficulty": "expert",
+        "id": "8151cb1c-a1a0-473d-b491-74c7a3988189",
+        "instrument": "guitar",
+        "modifiers": [
+            "no-modifiers"
+        ],
+        "played_at": "2024-02-14T18:34:46.999Z",
+        "player_id": "daniel-reis",
+        "score": 30005,
+        "song_id": "stone-audioslave"
+    },
+    {
+        "difficulty": "expert",
+        "id": "8e15add1-020e-4a84-90cc-2c48d6c246cb",
+        "instrument": "guitar",
+        "modifiers": [
+            "no-modifiers"
+        ],
+        "played_at": "2024-02-26T13:13:51.346Z",
+        "player_id": "startupme",
+        "score": 19999,
+        "song_id": "stone-audioslave"
+    }
+]
+```
 
 
 ### Additional Resources
