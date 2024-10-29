@@ -9,11 +9,11 @@
 .. title:: ScyllaDB Cloud Getting Started Example
 
 .. hero-box::
-  :title: Build a Gaming Leaderboard using ScyllaDB.
-  :image: /_static/img/mascots/scylla-cloud.svg
-  :button_icon: fa fa-github
+  :title: Build a Gaming Leaderboard using ScyllaDB
+  :image: /_static/img/mascots-2/cloud.svg
+  :button_icon: icon-github
   :button_url: https://github.com/scylladb/gaming-leaderboard-demo/
-  :button_text: Getting Started Project
+  :button_text: Source code
 
   This tutorial is a step-by-step guide to building a Gaming Leaderboard project connected to ScyllaDB.
   After completing the project, you will be able to create backend services that share data across a ScyllaDB cloud cluster.
@@ -32,7 +32,7 @@
 .. topic-box::
   :title: Getting Started with Scylla Cloud
   :link: getting-started
-  :icon: scylla-icon scylla-icon--getting-started
+  :icon: icon-docs-getting-started
   :class: large-4
   :anchor: Get Started
 
@@ -41,7 +41,7 @@
 .. topic-box::
   :title: Design and Data Model
   :link: design-and-data-model
-  :icon: scylla-icon scylla-icon--overview
+  :icon: icon-docs-alternator
   :class: large-4
   :anchor: Learn more
 
@@ -49,7 +49,7 @@
 
 .. topic-box::
   :title: Next Project: Care-Pet
-  :icon: scylla-icon scylla-icon--blog
+  :icon: icon-docs-blog
   :link: https://iot.scylladb.com/stable
   :class: large-4,small-12
   :anchor: Go to the Project
