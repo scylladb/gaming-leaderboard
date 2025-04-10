@@ -14,6 +14,7 @@
   :button_icon: icon-github
   :button_url: https://github.com/scylladb/gaming-leaderboard-demo/
   :button_text: Source code
+  :button_style: bold
 
   This tutorial is a step-by-step guide to building a Gaming Leaderboard project connected to ScyllaDB.
   After completing the project, you will be able to create backend services that share data across a ScyllaDB cloud cluster.
@@ -32,7 +33,7 @@
 .. topic-box::
   :title: Getting Started with Scylla Cloud
   :link: getting-started
-  :icon: icon-docs-getting-started
+  :icon: icon-play-circle
   :class: large-4
   :anchor: Get Started
 
@@ -41,7 +42,7 @@
 .. topic-box::
   :title: Design and Data Model
   :link: design-and-data-model
-  :icon: icon-docs-alternator
+  :icon: icon-database
   :class: large-4
   :anchor: Learn more
 
@@ -49,7 +50,7 @@
 
 .. topic-box::
   :title: Next Project: Care-Pet
-  :icon: icon-docs-blog
+  :icon: icon-edit
   :link: https://iot.scylladb.com/stable
   :class: large-4,small-12
   :anchor: Go to the Project
